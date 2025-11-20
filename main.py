@@ -1,6 +1,11 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, EmailStr
+from typing import Optional
+from datetime import datetime
+
+from database import create_document
 
 app = FastAPI()
 
@@ -20,6 +25,27 @@ def read_root():
 def hello():
     return {"message": "Hello from the backend API!"}
 
+class ContactPayload(BaseModel):
+    name: str = Field(..., min_length=2, max_length=100)
+    email: EmailStr
+    message: str = Field(..., min_length=5, max_length=5000)
+
+@app.post("/contact")
+def submit_contact(payload: ContactPayload):
+    try:
+        doc = {
+            "name": payload.name,
+            "email": payload.email,
+            "message": payload.message,
+            "submitted_at": datetime.utcnow().isoformat() + "Z",
+            "source": "website"
+        }
+        # Persist to database using the helper that also sets timestamps
+        create_document("contact", doc)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/test")
 def test_database():
     """Test endpoint to check if database is available and accessible"""
@@ -33,7 +59,6 @@ def test_database():
     }
     
     try:
-        # Try to import database module
         from database import db
         
         if db is not None:
@@ -42,10 +67,9 @@ def test_database():
             response["database_name"] = db.name if hasattr(db, 'name') else "✅ Connected"
             response["connection_status"] = "Connected"
             
-            # Try to list collections to verify connectivity
             try:
                 collections = db.list_collection_names()
-                response["collections"] = collections[:10]  # Show first 10 collections
+                response["collections"] = collections[:10]
                 response["database"] = "✅ Connected & Working"
             except Exception as e:
                 response["database"] = f"⚠️  Connected but Error: {str(e)[:50]}"
@@ -57,13 +81,10 @@ def test_database():
     except Exception as e:
         response["database"] = f"❌ Error: {str(e)[:50]}"
     
-    # Check environment variables
-    import os
     response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
     response["database_name"] = "✅ Set" if os.getenv("DATABASE_NAME") else "❌ Not Set"
     
     return response
-
 
 if __name__ == "__main__":
     import uvicorn
